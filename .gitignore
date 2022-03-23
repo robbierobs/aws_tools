@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+staging.yml
+production.yml
+dev.yml
 
 # C extensions
 *.so
