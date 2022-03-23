@@ -30,8 +30,9 @@ def run_task(settings, override):
     )
 
     cluster = 'fargate-' + settings['deploymentName']
-    container_name = 'tendenci-' + settings['deploymentName']
-    task_definition = 'tendenci-' + settings['deploymentName'] + ':' + str(settings['taskDefinitionRev'])
+    service_name = settings['service_name']
+    container_name = service_name + '-' + settings['deploymentName']
+    task_definition = service_name + '-' + settings['deploymentName'] + ':' + str(settings['taskDefinitionRev'])
 
     response = client.run_task(
         cluster=cluster,
