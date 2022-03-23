@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
     arg = sys.argv[1:]
     if len(arg) < 2:
-        print('Please provide a deployment environment and the task override for tendenci. ex. python3 setup.py staging migrate')
+        print('Please provide a deployment environment and the task override for the service. ex. python3 setup.py staging migrate')
         quit()
     override = str(arg[1])
     env_file = str(arg[0]) + '.yml'

@@ -4,4 +4,5 @@ subnets: 'subnet-111111111111111111'
 securityGroup: 'sg-1111111111111111'
 taskDefinitionRev: 10
 role: 'arn:aws:iam::xxxxxxxxxxxxxx:role/rolename'
+container_name: 'this-service'
 
