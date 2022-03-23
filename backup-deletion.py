@@ -99,7 +99,6 @@ def snapshot_validation(item_list, days):
 
     for item in item_list:
         if backup in item['DBClusterSnapshotIdentifier']:
-            print(item)
             continue
         else:
             creation_date = item['SnapshotCreateTime']
@@ -213,6 +212,8 @@ def snapshot_cleaner(settings):
     # Checking each snapshot to for the correct date and to be sure it
     # is not an AWS Backup resource
     snapshot_list = snapshot_validation(snapshot_list, created_before)
+    total_objects = len(snapshot_list)
+
     top_5 = resource_generator(snapshot_list, 5, snapshots=True)
 
     for item in top_5:
@@ -221,7 +222,14 @@ def snapshot_cleaner(settings):
     print(f'\nFound %s snapshot(s).\n' % (len(snapshot_list)))
 
     batch_size = batch_pre(start_date, settings)
-
+    print(f'''
+          \n!!!!! CAUTION: THIS IS A DESTRUCTIVE ACT AND CANNOT BE UNDONE !!!!
+          \n
+          Total Objects: %s
+          Created before: %s (%s days and older)
+          \n
+          ''' %
+          (total_objects, start_date, created_before))
     batch_delete(
         items=snapshot_list,
         batch_size=batch_size,
