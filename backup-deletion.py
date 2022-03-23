@@ -1,10 +1,27 @@
 import sys
+import getopt
 import yaml
 import boto3
 import datetime
-from os import path
 import math
 import itertools
+import concurrent
+import concurrent.futures
+
+multiprocess = False
+
+def try_multiprocess(i, vault_name, items_to_delete, snapshots, backup, settings):
+    item = items_to_delete[i]
+    if vault_name and backup:
+        arn = item['arn']
+        response = delete_recovery_point(settings, vault_name, arn)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+        print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
+    if snapshots:
+        name = item['name']
+        response = delete_db_cluster_snapshot(settings, name)
+        status_code = response['ResponseMetadata']['HTTPStatusCode']
+        print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
 
 
 def choice_check(x, settings):
@@ -116,6 +133,8 @@ def get_client(settings, db=False, backup=False):
         aws_secret_access_key=credentials['SecretAccessKey'],
         aws_session_token=credentials['SessionToken']
     )
+    client._client_config._user_provided_options['tcp_keepalive'] = True
+    client._client_config._user_provided_options['max_pool_connections'] = 25
     return client
 
 
@@ -148,8 +167,8 @@ def cleaning_selection(choice, settings, db=False):
 
 def menu(settings, db=False):
 
-    main_menu_selection = ['a', 'b']
-    db_menu_selection = ['a', 'b', 'c']
+    main_menu_selection = ['a', 'b', 'q', 'quit']
+    db_menu_selection = ['a', 'b', 'c', 'q', 'quit']
 
     menu_text = """
 
@@ -178,6 +197,9 @@ def menu(settings, db=False):
             menu_selection = input('Select: ')
             menu_selection = menu_selection.lower()
 
+    if menu_selection in ('q', 'quit'):
+        quit()
+
     cleaning_selection(menu_selection, settings, db)
 
 
@@ -192,7 +214,7 @@ def snapshot_cleaner(settings):
     # is not an AWS Backup resource
     snapshot_list = snapshot_validation(snapshot_list, created_before)
     top_5 = resource_generator(snapshot_list, 5, snapshots=True)
-    # snap_list = resource_generator(snapshot_list, snapshots=True)
+
     for item in top_5:
         print(preview_string(item, snapshots=True))
 
@@ -254,12 +276,13 @@ def describe_db_snapshots(settings):
         IncludePublic=True,
         # DbiResourceId='string'
     )
-    print(response)
+    # print(response)
     snapshot_list = []
     for snapshot in response['DBSnapshots']:
         snapshot_list.append(snapshot)
 
     return snapshot_list
+
 
 def describe_db_clusters(settings):
     client = get_client(settings,db=True)
@@ -301,6 +324,7 @@ def describe_db_instance_automated_backups(client):
         # DBInstanceAutomatedBackupsArn='string'
     )
     return response
+
 
 def resource_generator(items, items_to_show=None, db_cluster=False, snapshots=False):
 
@@ -408,21 +432,27 @@ def batch_delete(items, batch_size, settings, vault_name=None, backup=None, db=N
         choice_check(confirm_delete, settings)
 
         if confirm_delete in ('y', 'yes'):
-            for x in range(0, batch_size, 1):
-                if vault_name and backup:
-                    item = items_to_delete.pop()
-                    arn = item['arn']
-                    # client = get_client(settings, backup=True)
-                    response = delete_recovery_point(settings, vault_name, arn)
-                    status_code = response['ResponseMetadata']['HTTPStatusCode']
-                    print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
-                if snapshots:
-                    item = items_to_delete.pop()
-                    cluster = item['db_cluster']
-                    name = item['name']
-                    response = delete_db_cluster_snapshot(settings, name)
-                    status_code = response['ResponseMetadata']['HTTPStatusCode']
-                    print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
+
+            global multiprocess
+            if multiprocess:
+                with concurrent.futures.ThreadPoolExecutor() as e:
+                    fut = [e.submit(try_multiprocess, i, settings=settings, vault_name=vault_name, backup=backup, items_to_delete=items_to_delete, snapshots=snapshots) for i in range(0, batch_size, 1)]
+                    for r in concurrent.futures.as_completed(fut):
+                        r.result()
+            else:
+                for x in range(0, batch_size, 1):
+                    if vault_name and backup:
+                        item = items_to_delete.pop()
+                        arn = item['arn']
+                        response = delete_recovery_point(settings, vault_name, arn)
+                        status_code = response['ResponseMetadata']['HTTPStatusCode']
+                        print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
+                    if snapshots:
+                        item = items_to_delete.pop()
+                        name = item['name']
+                        response = delete_db_cluster_snapshot(settings, name)
+                        status_code = response['ResponseMetadata']['HTTPStatusCode']
+                        print(f'%s \n\t Status Code: %s' % (preview_string(item), status_code))
             print(f'''
                   \n\tBatch deletion complete for %s items.
                   Ending objects: %s
@@ -431,6 +461,8 @@ def batch_delete(items, batch_size, settings, vault_name=None, backup=None, db=N
         if confirm_delete in ('c', 'change'):
             batch_size = input('\nChange batch size: ')
             batch_size = int(batch_size)
+
+    menu(settings)
 
 
 def preview_string(item, db_cluster=False, snapshots=False):
@@ -471,14 +503,12 @@ def preview_string(item, db_cluster=False, snapshots=False):
         else:
             attributes = attributes_dict.get('backups')
 
-
     key_values = []
     for key in attributes:
         if key[0] in item:
             if key[0] == 'cluster_members':
                 item[key[0]] = len(item[key[0]])
             key_values.append(key[1] + ': ' + str(item[key[0]]))
-
 
     preview = '\t'.join(key_values)
     return preview
@@ -599,28 +629,47 @@ def rds_cleaner(settings):
     clusters = resource_generator(items=cluster_list, db_cluster=True)
 
     print(f'\nFound %s cluster(s).\n' % (len(clusters)))
-    print(preview_string(clusters[0], db_cluster=True))
+    for cluster in clusters:
+        print(preview_string(cluster, db_cluster=True))
 
     snapshots = describe_db_cluster_snapshots(settings)
     print(f'\nFound %s snapshots. (Max of 100 found at a time).' % (len(snapshots)))
 
     automated_backups = describe_db_instance_automated_backups(client)
-    print(f'Found %s automated backups. (Max of 100 found at a time).' % (len(automated_backups)))
+    print(f'\nFound %s automated backups. (Max of 100 found at a time).' % (len(automated_backups)))
 
     menu(settings, db=True)
 
 
-if __name__ == "__main__":
+def main(argv):
 
-    arg = sys.argv[1:]
-    if len(arg) < 1:
-        print('Please provide a deployment environment.')
-        quit()
-    env_file = str(arg[0]) + '.yml'
+    inputfile = ''
+    try:
+        opts, args = getopt.getopt(argv, "hmi:", ["ifile="])
+    except getopt.GetoptError:
+        print('backup_cleaner.py -i <environmentfile>')
+        sys.exit(2)
 
-    if not path.exists(env_file):
-        print('Please create a yaml file. ex. ' + env_file)
+    for opt, arg in opts:
+        if opt == '-h':
+            print('backup_cleaner.py -i dev.yml')
+            sys.exit()
+        elif opt in ("-i", "--ifile"):
+            inputfile = arg
+            settings = parse_yaml(inputfile)
+        elif opt == '-m':
+            global multiprocess
+            multiprocess = True
+
+    if not inputfile:
+        print('''
+              \nERROR: Please create a yaml file. ex. dev.yml and call the function with the -i argument.
+              \nex. python3 backup_cleaner.py -i dev.yml
+              ''')
         quit()
-    settings = parse_yaml(env_file)
 
     menu(settings)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
