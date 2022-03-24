@@ -7,10 +7,9 @@ import concurrent
 import concurrent.futures
 import time
 
-from utils import parse_yaml, get_client, snapshot_validation
+from utils import parse_yaml, get_client, snapshot_validation, get_account_number
 
 multiprocess = False
-
 def try_multiprocess(i, vault_name, items_to_delete, snapshots, backup, settings, auto_mode, batch_size):
     item = items_to_delete[i]
     if auto_mode:
@@ -165,17 +164,18 @@ def snapshot_cleaner(settings):
     snapshot_list = describe_db_cluster_snapshots(settings)
     # Checking each snapshot to for the correct date and to be sure it
     # is not an AWS Backup resource
-    snapshot_list = snapshot_validation(snapshot_list, created_before)
+    snapshot_list = snapshot_validation(snapshot_list, created_before, settings)
     total_objects = len(snapshot_list)
 
     top_5 = resource_generator(snapshot_list, 5, snapshots=True)
 
+    print(f'\n\n\t\t--------- Preview of top 5 snapshots ----------\n')
+
     for item in top_5:
         print(preview_string(item, snapshots=True))
 
+    print(f'\t\t-----------------------------------------------')
     print(f'\nFound %s snapshot(s).\n' % (len(snapshot_list)))
-
-    batch_size = batch_pre(start_date, settings)
     print(f'''
           \n!!!!! CAUTION: THIS IS A DESTRUCTIVE ACT AND CANNOT BE UNDONE !!!!
           \n
@@ -184,6 +184,9 @@ def snapshot_cleaner(settings):
           \n
           ''' %
           (total_objects, start_date, created_before))
+
+    batch_size = batch_pre(start_date, settings)
+
     batch_delete(
         items=snapshot_list,
         batch_size=batch_size,
@@ -231,6 +234,7 @@ def list_recovery_points_by_backup_vault(settings, vault_name, backup_id, start_
     return recovery_point_list
 
 def describe_db_cluster_snapshots(settings):
+    account_number = get_account_number(settings)
     snapshot_list = []
     marker = ''
 
@@ -662,7 +666,7 @@ def backup_cleaner(settings):
 
 def rds_cleaner(settings):
 
-    client = get_client(settings, db=True)
+    # client = get_client(settings, db=True)
 
     cluster_list = describe_db_clusters(settings)
     clusters = resource_generator(items=cluster_list, db_cluster=True)
@@ -671,11 +675,11 @@ def rds_cleaner(settings):
     for cluster in clusters:
         print(preview_string(cluster, db_cluster=True))
 
-    snapshots = describe_db_cluster_snapshots(settings)
-    print(f'\nFound %s snapshots. (Max of 100 found at a time).' % (len(snapshots)))
+    # snapshots = describe_db_cluster_snapshots(settings)
+    # print(f'\nFound %s snapshots. (Max of 100 found at a time).' % (len(snapshots)))
 
-    automated_backups = describe_db_instance_automated_backups(client)
-    print(f'\nFound %s automated backups. (Max of 100 found at a time).' % (len(automated_backups)))
+    # automated_backups = describe_db_instance_automated_backups(client)
+    # print(f'\nFound %s automated backups. (Max of 100 found at a time).' % (len(automated_backups)))
 
     #TODO: Pass snapshot/automated_backups,clusters through the menu
     #to not create additional calls which are not needed

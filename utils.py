@@ -24,7 +24,6 @@ def get_client(settings, db=False, backup=False):
     elif db:
         client_scope = 'rds'
 
-
     client = boto3.client(
         client_scope,
         aws_access_key_id=credentials['AccessKeyId'],
@@ -36,17 +35,18 @@ def get_client(settings, db=False, backup=False):
     return client
 
 
-def snapshot_validation(item_list, days):
+def snapshot_validation(item_list, days, settings):
 
     start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(int(days))
     start_date = start_date.date()
 
     backup = 'awsbackup:'
+    account = get_account_number(settings)
 
     refined_list = []
 
     for item in item_list:
-        if backup in item['DBClusterSnapshotIdentifier']:
+        if (backup in item['DBClusterSnapshotIdentifier']) or (account not in item['DBClusterSnapshotArn']):
             continue
         else:
             creation_date = item['SnapshotCreateTime']
@@ -55,4 +55,25 @@ def snapshot_validation(item_list, days):
                 refined_list.append(item)
 
     return refined_list
+
+
+def get_account_number(settings):
+    sts_client = boto3.client('sts')
+
+    assumed_role_object = sts_client.assume_role(
+        RoleArn=settings['role'],
+        RoleSessionName='backup-plan-cleanup'
+    )
+
+    credentials = assumed_role_object['Credentials']
+
+    client = boto3.client(
+        'sts',
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretAccessKey'],
+        aws_session_token=credentials['SessionToken']
+    )
+    account_number = client.get_caller_identity().get('Account')
+
+    return account_number
 
