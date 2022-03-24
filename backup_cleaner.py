@@ -5,13 +5,17 @@ import math
 import itertools
 import concurrent
 import concurrent.futures
+import time
 
 from utils import parse_yaml, get_client, snapshot_validation
 
 multiprocess = False
 
-def try_multiprocess(i, vault_name, items_to_delete, snapshots, backup, settings):
+def try_multiprocess(i, vault_name, items_to_delete, snapshots, backup, settings, auto_mode, batch_size):
     item = items_to_delete[i]
+    if auto_mode:
+        wait_time = batch_size / 20
+        time.sleep(wait_time)
     if vault_name and backup:
         arn = item['arn']
         response = delete_recovery_point(settings, vault_name, arn)
@@ -155,7 +159,6 @@ def menu(settings, db=False):
 
 def snapshot_cleaner(settings):
 
-
     created_before = input('Select snapshots that were created how many days ago? ')
     start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(int(created_before))
 
@@ -188,29 +191,82 @@ def snapshot_cleaner(settings):
         backup=False,
         settings=settings)
 
+
+def list_recovery_points_by_backup_vault(settings, vault_name, backup_id, start_date):
+    recovery_point_list = []
+    token = ''
+
+    print('\nCompiling recovery point list...', end='')
+    while True:
+        print('...', end='', flush=True)
+        client = get_client(settings, backup=True, db=False)
+        if token:
+            response = client.list_recovery_points_by_backup_vault(
+                BackupVaultName=vault_name,
+                MaxResults=500,
+                ByBackupPlanId=backup_id,
+                ByCreatedBefore=start_date,
+                NextToken=token
+            )
+        else:
+            response = client.list_recovery_points_by_backup_vault(
+                BackupVaultName=vault_name,
+                MaxResults=500,
+                ByBackupPlanId=backup_id,
+                ByCreatedBefore=start_date
+            )
+
+        if 'NextToken' in response:
+            token = response['NextToken']
+        else:
+            token = ''
+
+        for point in response['RecoveryPoints']:
+            recovery_point_list.append(point)
+
+        if not token:
+            print('\n')
+            break
+
+    return recovery_point_list
+
 def describe_db_cluster_snapshots(settings):
-    client = get_client(settings, db=True)
-    response = client.describe_db_cluster_snapshots(
-        # DBInstanceIdentifier='string',
-        # DBSnapshotIdentifier='string',
-        # SnapshotType='string',
-        # Filters=[
-        #     {
-        #         'Name': 'string',
-        #         'Values': [
-        #             'string',
-        #         ]
-        #     },
-        # ],
-        MaxRecords=100,
-        # Marker='string',
-        IncludeShared=True,
-        IncludePublic=True,
-        # DbiResourceId='string'
-    )
     snapshot_list = []
-    for snapshot in response['DBClusterSnapshots']:
-        snapshot_list.append(snapshot)
+    marker = ''
+
+    print('\nCompiling snapshot list...', end='')
+    while True:
+        print('...', end='', flush=True)
+        client = get_client(settings, db=True)
+        response = client.describe_db_cluster_snapshots(
+            # DBInstanceIdentifier='string',
+            # DBSnapshotIdentifier='string',
+            # SnapshotType='string',
+            # Filters=[
+            #     {
+            #         'Name': 'string',
+            #         'Values': [
+            #             'string',
+            #         ]
+            #     },
+            # ],
+            MaxRecords=100,
+            Marker=marker,
+            IncludeShared=True,
+            IncludePublic=True,
+            # DbiResourceId='string'
+        )
+        if 'Marker' in response:
+            marker = response['Marker']
+        else:
+            marker = ''
+
+        for snapshot in response['DBClusterSnapshots']:
+            snapshot_list.append(snapshot)
+
+        if not marker:
+            print('\n')
+            break
 
     return snapshot_list
 
@@ -239,6 +295,8 @@ def describe_db_snapshots(settings):
     snapshot_list = []
     for snapshot in response['DBSnapshots']:
         snapshot_list.append(snapshot)
+
+    print(snapshot_list)
 
     return snapshot_list
 
@@ -366,16 +424,29 @@ def delete_db_cluster_snapshot(settings, name):
 
 def batch_delete(items, batch_size, settings, vault_name=None, backup=None, db=None, snapshots=False):
 
+    def batch_size_validation(items, batch_size):
+        if len(items) - batch_size < 0:
+            difference = len(items) - batch_size
+            if -difference != len(items):
+                batch_size = batch_size + difference
+                print(f'\nThe batch size has been adjusted from %s to %s as there (is/are) only %s item(s) to delete.' % (
+                    (batch_size - difference), batch_size, len(items)))
+        return batch_size
+
+    auto_mode = False
     confirm_delete = -1
     bail = ['quit', 'q', 'm', 'menu']
 
-    if len(items) - batch_size < 0:
-        difference = len(items) - batch_size
-        batch_size = batch_size + difference
-        print(f'\nThe batch size has been adjusted from %s to %s as there (is/are) only %s item(s) to delete.' % (
-            (batch_size - difference), batch_size, len(items)))
+    batch_size = batch_size_validation(items, batch_size)
+
+    # if len(items) - batch_size < 0:
+    #     difference = len(items) - batch_size
+    #     batch_size = batch_size + difference
+    #     print(f'\nThe batch size has been adjusted from %s to %s as there (is/are) only %s item(s) to delete.' % (
+    #         (batch_size - difference), batch_size, len(items)))
 
     while (len(items) - batch_size >= 0) and (confirm_delete not in bail):
+        batch_size = batch_size_validation(items, batch_size)
         batch_list = batch(items, batch_size, snapshots=snapshots)
         items = batch_list[0]
         items_to_delete = batch_list[1]
@@ -383,19 +454,26 @@ def batch_delete(items, batch_size, settings, vault_name=None, backup=None, db=N
         for item in items_to_delete:
             print(preview_string(item, snapshots=snapshots))
 
+        if auto_mode:
+            confirm_delete = 'y'
+
         confirm_delete = -1
-        while confirm_delete not in ('yes', 'y', 'c', 'm', 'q', 'quit', 'change', 'menu'):
-            confirm_delete = input('\nConfirm: Delete these items (y/c/m/quit): ')
+        if auto_mode:
+            confirm_delete = 'y'
+        while confirm_delete not in ('yes', 'y', 'c', 'm', 'q', 'a', 'quit', 'change', 'menu', 'auto'):
+            confirm_delete = input('\nConfirm: Delete these items (y/c/m/a/quit): ')
             confirm_delete = confirm_delete.lower()
 
         choice_check(confirm_delete, settings)
 
-        if confirm_delete in ('y', 'yes'):
+        if confirm_delete in ('y', 'yes', 'a', 'auto'):
+            if confirm_delete in ('a', 'auto'):
+                auto_mode = True
 
             global multiprocess
             if multiprocess:
-                with concurrent.futures.ThreadPoolExecutor() as e:
-                    fut = [e.submit(try_multiprocess, i, settings=settings, vault_name=vault_name, backup=backup, items_to_delete=items_to_delete, snapshots=snapshots) for i in range(0, batch_size, 1)]
+                with concurrent.futures.ThreadPoolExecutor(16) as e:
+                    fut = [e.submit(try_multiprocess, i, settings=settings, vault_name=vault_name, backup=backup, items_to_delete=items_to_delete, snapshots=snapshots, auto_mode=auto_mode, batch_size=batch_size) for i in range(0, batch_size, 1)]
                     for r in concurrent.futures.as_completed(fut):
                         r.result()
             else:
@@ -417,9 +495,17 @@ def batch_delete(items, batch_size, settings, vault_name=None, backup=None, db=N
                   Ending objects: %s
                   ''' % (batch_size, str(len(items))))
 
+        # if confirm_delete in ('a', 'auto'):
+        #     auto_mode = True
+
         if confirm_delete in ('c', 'change'):
             batch_size = input('\nChange batch size: ')
             batch_size = int(batch_size)
+
+        batch_size = batch_size_validation(items, batch_size)
+
+        if items == 0 or batch_size == 0:
+            break
 
     menu(settings)
 
@@ -540,15 +626,9 @@ def backup_cleaner(settings):
     created_before = input('Select recovery points that were created how many days ago? ')
     start_date = datetime.datetime.now() - datetime.timedelta(int(created_before))
 
+    recovery_points = list_recovery_points_by_backup_vault(
+        settings, vault_name, backup_id, start_date)
 
-    recovery_points = client.list_recovery_points_by_backup_vault(
-        BackupVaultName=vault_name,
-        # MaxResults=500,
-        ByBackupPlanId=backup_id,
-        ByCreatedBefore=start_date,
-    )
-
-    recovery_points = recovery_points['RecoveryPoints']
     total_objects = len(recovery_points)
 
     top_5 = resource_generator(recovery_points, 5)
@@ -597,6 +677,8 @@ def rds_cleaner(settings):
     automated_backups = describe_db_instance_automated_backups(client)
     print(f'\nFound %s automated backups. (Max of 100 found at a time).' % (len(automated_backups)))
 
+    #TODO: Pass snapshot/automated_backups,clusters through the menu
+    #to not create additional calls which are not needed
     menu(settings, db=True)
 
 
