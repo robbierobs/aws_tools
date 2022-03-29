@@ -277,7 +277,6 @@ def process_pricing(services):
         }
 
         changes.append(change)
-    print(changes)
 
     for change in changes:
         name = change['name']
@@ -285,12 +284,13 @@ def process_pricing(services):
         for index, data in enumerate(change['data']):
             key = key_list[index]
             dataframe[key].append(data)
-    print(dataframe)
 
     df = pd.DataFrame(
         dataframe, index=list(names),
         # columns=pd.MultiIndex.from_product([['Decision Tree', 'Regression', 'Random'],['Tumour', 'Non-Tumour']], names=['Model:', 'Predicted:'])
     )
+    df.loc['Total'] = df.sum()
+    df = df.round(2)
     return df
 
 
