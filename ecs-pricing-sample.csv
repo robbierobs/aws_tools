@@ -1,0 +1,2 @@
+Service Name,Current Count,New Count,Current vCPU Value,New vCPU Value,Current Memory (in MB),New Memory (in MB)
+Zookeeper,3,3,1024,256,2048,512
