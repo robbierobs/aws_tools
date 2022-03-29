@@ -12,6 +12,17 @@ import datetime
 from pretty_html_table import build_table
 
 
+class FargatePricing():
+    def __init__(self):
+        ''' No Upfront Costs '''
+        self.on_demand_cpu = 0.04048
+        self.on_demand_mem = 0.004445
+        self.one_year_cpu = 0.032384
+        self.one_year_mem = 0.003556
+        self.three_year_cpu = 0.022264
+        self.three_year_mem = 0.00244475
+        self.monthly = 730
+
 class ECS_Service():
     def __init__(self):
         self.service_name = '-'
@@ -211,6 +222,78 @@ def process_services(services):
     )
     return df
 
+def process_pricing(services):
+
+    fargate = FargatePricing()
+
+    headers = [
+        'Current Total CPU',
+        'Current CPU Price',
+        'New Total CPU',
+        'New CPU Price',
+        'CPU Price Diff',
+        'Current Total Memory',
+        'Current Mem Price',
+        'New Total Memory',
+        'New Mem Price',
+        'Mem Price Diff',
+        'Total Price Diff'
+    ]
+
+    dataframe = {}
+    key_list = list(headers)
+    names = []
+    changes = []
+
+    for header in headers:
+        dataframe[header] = []
+
+    for service in services:
+        current_cpu_price = (service.current_cpu_total / 1024) * (fargate.one_year_cpu * fargate.monthly)
+        new_cpu_price = (service.new_cpu_total / 1024) * (fargate.one_year_cpu * fargate.monthly)
+        cpu_diff = new_cpu_price - current_cpu_price
+        current_mem_price = (service.current_mem_total / 1024) * (fargate.one_year_mem * fargate.monthly)
+        new_mem_price = (service.new_mem_total / 1024) * (fargate.one_year_mem * fargate.monthly)
+        total_cpu_diff = (service.total_cpu_diff / 1024) * (fargate.one_year_cpu * fargate.monthly)
+        total_mem_diff = (service.total_mem_diff / 1024) * (fargate.one_year_mem * fargate.monthly)
+        total_price_diff = total_cpu_diff + total_mem_diff
+
+        change = {
+            'name': service.service_name,
+            'data': [
+                service.current_cpu_total,
+                current_cpu_price,
+                service.new_cpu_total,
+                new_cpu_price,
+                cpu_diff,
+                service.current_mem_total,
+                current_mem_price,
+                service.new_mem_total,
+                new_mem_price,
+                total_mem_diff,
+                total_price_diff
+
+            ]
+        }
+
+        changes.append(change)
+    print(changes)
+
+    for change in changes:
+        name = change['name']
+        names.append(name)
+        for index, data in enumerate(change['data']):
+            key = key_list[index]
+            dataframe[key].append(data)
+    print(dataframe)
+
+    df = pd.DataFrame(
+        dataframe, index=list(names),
+        # columns=pd.MultiIndex.from_product([['Decision Tree', 'Regression', 'Random'],['Tumour', 'Non-Tumour']], names=['Model:', 'Predicted:'])
+    )
+    return df
+
+
 
 
 
@@ -408,9 +491,11 @@ def manual():
 
 def run_csv(inputfile):
     services = import_csv(inputfile)
-    df = process_services(services)
+    service_df = process_services(services)
+    pricing_df = process_pricing(services)
 
-    print(tabulate(df, headers='keys', tablefmt='pretty'))
+    print(tabulate(service_df, headers='keys', tablefmt='pretty'))
+    print(tabulate(pricing_df, headers='keys', tablefmt='pretty'))
 
 
 def main(argv):
