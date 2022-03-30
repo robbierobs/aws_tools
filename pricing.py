@@ -12,6 +12,44 @@ import datetime
 from pretty_html_table import build_table
 
 
+def get_table_html(df):
+
+    """
+    From https://stackoverflow.com/a/49687866/2007153
+
+    Get a Jupyter like html of pandas dataframe
+
+    """
+
+    styles = [
+        #table properties
+        dict(selector=" ",
+             props=[("margin","0"),
+                    ("font-family",'"Helvetica", "Arial", sans-serif'),
+                    ("border-collapse", "collapse"),
+                    ("border","none"),
+                    # ("border", "2px solid #ccf")
+                       ]),
+
+        #background shading
+        dict(selector="tbody tr:nth-child(even)",
+             props=[("background-color", "#fff")]),
+        dict(selector="tbody tr:nth-child(odd)",
+             props=[("background-color", "#eee")]),
+
+        #cell spacing
+        dict(selector="td",
+             props=[("padding", ".5em")]),
+
+        #header cell properties
+        dict(selector="th",
+             props=[("font-size", "100%"),
+                    ("text-align", "center")]),
+
+
+    ]
+    return (df.style.set_table_styles(styles)).render()
+
 class FargatePricing():
     def __init__(self):
         ''' No Upfront Costs '''
@@ -218,9 +256,9 @@ def process_services(services):
 
     df = pd.DataFrame(
         dataframe, index=list(names),
-        # columns=pd.MultiIndex.from_product([['Decision Tree', 'Regression', 'Random'],['Tumour', 'Non-Tumour']], names=['Model:', 'Predicted:'])
     )
     return df
+
 
 def process_pricing(services):
 
@@ -287,43 +325,20 @@ def process_pricing(services):
 
     df = pd.DataFrame(
         dataframe, index=list(names),
-        # columns=pd.MultiIndex.from_product([['Decision Tree', 'Regression', 'Random'],['Tumour', 'Non-Tumour']], names=['Model:', 'Predicted:'])
     )
     df.loc['Total'] = df.sum()
     df = df.round(2)
     return df
 
 
-
-
-
-
 def display_df_html(df):
-    style = """
-    <head>
-    <style>
-    table {
-    color: blue;
-    }
-
-    </style>
-    </head>
-    """
-    # html = HTML_with_style(df, style=my_style)
-    # html_table_blue_light = build_table(df, 'blue_light')
-    # print(html_table_blue_light)
-    # filename = 'styled_table.html'
-    # with open(filename, 'w') as f:
-    #     # f.write(html_table_blue_light)
-    #     f.write(html)
-    html = df.to_html()
-    html = style+html
+    df = get_table_html(df)
     filename = 'pandas.html'
     with open(filename, 'w') as f:
-        f.write(html)
-    # df.to_html(filename)
+        f.write(df)
     file_location = os.path.abspath(f'./%s' % (filename))
     webbrowser.open('file://' + file_location)
+
 
 def define_service():
     new_cpu = 0
@@ -361,9 +376,6 @@ def define_service():
         'new_mem': new_mem
         }
     return service_definition
-
-def remove_service():
-    pass
 
 
 def manual():
@@ -484,9 +496,6 @@ def manual():
         # columns=pd.MultiIndex.from_product([['Decision Tree', 'Regression', 'Random'],['Tumour', 'Non-Tumour']], names=['Model:', 'Predicted:'])
     )
     df.style
-    # df.style.highlight_max()
-    # display(df)
-    # display_df_html(df)
     print(tabulate(df, headers='keys', tablefmt='pretty'))
 
 def run_csv(inputfile):
@@ -496,6 +505,8 @@ def run_csv(inputfile):
 
     print(tabulate(service_df, headers='keys', tablefmt='pretty'))
     print(tabulate(pricing_df, headers='keys', tablefmt='pretty'))
+
+    display_df_html(pricing_df)
 
 
 def main(argv):
