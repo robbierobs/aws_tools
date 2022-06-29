@@ -29,10 +29,32 @@ def run_task(settings, override):
         aws_session_token=credentials['SessionToken']
     )
 
-    cluster = 'fargate-' + settings['deploymentName']
-    service_name = settings['service_name']
-    container_name = service_name + '-' + settings['deploymentName']
-    task_definition = service_name + '-' + settings['deploymentName'] + ':' + str(settings['taskDefinitionRev'])
+    cluster = settings['cluster_name']
+    application_name = settings['application_name']
+    deployment_name = settings['deployment_name']
+
+    service_name = f'{application_name}-{deployment_name}'
+
+    service_description = client.describe_services(
+        cluster=cluster,
+        services=[
+            service_name,
+        ]
+    )
+
+    subnets = service_description['services'][0]['deployments'][0]\
+                    ['networkConfiguration']['awsvpcConfiguration']\
+                    ['subnets']
+    security_groups = service_description['services'][0]['deployments']\
+            [0]['networkConfiguration']['awsvpcConfiguration']\
+            ['securityGroups']
+
+    # Get the current running task definition revision
+    current_task_definition = client.describe_task_definition(
+        taskDefinition=service_name)
+
+    current_revision = current_task_definition['taskDefinition']['revision']
+    task_definition = f'{service_name}:{current_revision}'
 
     response = client.run_task(
         cluster=cluster,
@@ -41,22 +63,17 @@ def run_task(settings, override):
         launchType='FARGATE',
         networkConfiguration={
             'awsvpcConfiguration': {
-                'subnets': [
-                    settings['subnets'],
-                ],
-                'securityGroups': [
-                    settings['securityGroup'],
-                ],
+                'subnets': subnets,
+                'securityGroups': security_groups,
                 'assignPublicIp': 'DISABLED'
             }
         },
         overrides={
             'containerOverrides': [
                 {
-                    'name': container_name,
-                    'command': [
-                        override,
-                    ]
+                    'name': service_name,
+                    'command': override,
+
                 }
             ]
         },
@@ -102,14 +119,17 @@ if __name__ == "__main__":
 
     arg = sys.argv[1:]
     if len(arg) < 2:
-        print('Please provide a deployment environment and the task override for the service. ex. python3 setup.py staging migrate')
+        print('Please provide a deployment environment and the task override for tendenci. ex. python3 setup.py staging migrate')
         quit()
-    override = str(arg[1])
+    override = str(arg[1]).split()
+
+    print(override)
+
     env_file = str(arg[0]) + '.yml'
     if not path.exists(env_file):
         print('Please create a yaml file. ex. ' + env_file)
         quit()
     settings = parse_yaml(env_file)
     response = run_task(settings, override)
-    output_details(response, settings)
+    # output_details(response, settings)
 
