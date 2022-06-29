@@ -2,10 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-staging.yml
-production.yml
-dev.yml
-
+*.yml
 # C extensions
 *.so
 
