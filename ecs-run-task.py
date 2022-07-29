@@ -30,10 +30,19 @@ def run_task(settings, override):
     )
 
     cluster = settings['cluster_name']
+    print(cluster)
     application_name = settings['application_name']
     deployment_name = settings['deployment_name']
 
-    service_name = f'{application_name}-{deployment_name}'
+    if settings['ignore_service_env']:
+        service_name = application_name
+    else:
+        service_name = f'{application_name}-{deployment_name}'
+
+    if settings['ignore_task_def_env']:
+        task_def_name = application_name
+    else:
+        task_def_name = f'{application_name}-{deployment_name}'
 
     service_description = client.describe_services(
         cluster=cluster,
@@ -51,10 +60,10 @@ def run_task(settings, override):
 
     # Get the current running task definition revision
     current_task_definition = client.describe_task_definition(
-        taskDefinition=service_name)
+        taskDefinition=task_def_name)
 
     current_revision = current_task_definition['taskDefinition']['revision']
-    task_definition = f'{service_name}:{current_revision}'
+    task_definition = f'{task_def_name}:{current_revision}'
 
     response = client.run_task(
         cluster=cluster,
@@ -71,7 +80,7 @@ def run_task(settings, override):
         overrides={
             'containerOverrides': [
                 {
-                    'name': service_name,
+                    'name': task_def_name,
                     'command': override,
 
                 }
@@ -131,5 +140,4 @@ if __name__ == "__main__":
         quit()
     settings = parse_yaml(env_file)
     response = run_task(settings, override)
-    # output_details(response, settings)
-
+    output_details(response, settings)
