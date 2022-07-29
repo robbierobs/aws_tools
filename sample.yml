@@ -1,5 +1,7 @@
 cluster_name: 'fargate-cluster'
 application_name: 'my-django-app'
 deployment_name: 'dev'
+ignore_service_env: false
+ignore_task_def_env: false
 count: 1
 role: 'arn:aws:iam::55555555555:role/myrole'
